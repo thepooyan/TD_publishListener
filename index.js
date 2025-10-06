@@ -74,10 +74,10 @@ const verifySignature = async (c, next) => {
 // --- --- --- --- --- --- --- --- --- --- --- --- --- --- ---
 
 // A simple root endpoint to confirm the server is running
-app.get('/webhook', (c) => c.text('Git auto-deploy server is listening...'));
+app.get('/', (c) => c.text('Git auto-deploy server is listening...'));
 
 // The main webhook endpoint
-app.post('/webhook', verifySignature, async (c) => {
+app.post('/', verifySignature, async (c) => {
   const payload = c.get('payload');
   const event = c.req.header('X-GitHub-Event'); // For GitHub
 
