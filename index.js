@@ -1,134 +1,71 @@
-import { Hono } from 'hono';
-import { serve } from '@hono/node-server';
-import { exec } from 'child_process';
-import crypto from 'crypto';
-import { promisify } from 'util';
-import 'dotenv/config'; // Automatically load .env file
+import { Hono } from 'hono'
+import { $ } from 'bun'
+import crypto from 'crypto'
 
-// --- --- --- --- --- --- --- --- --- --- --- --- --- --- ---
-// CONFIGURATION
-// --- --- --- --- --- --- --- --- --- --- --- --- --- --- ---
+const REPO_PATH = process.env.REPO_PATH ?? '/var/www/my-project'
+const SECRET = process.env.GITHUB_SECRET
 
-// Promisify the exec function to use it with async/await
-const execPromise = promisify(exec);
-
-// Load configuration from environment variables
-const PORT = parseInt(process.env.PORT) || 3000;
-const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
-const REPO_BRANCH = process.env.REPO_BRANCH || 'main'; // Default to 'main' branch
-
-// Exit if the secret is not configured, as it's crucial for security
-if (!WEBHOOK_SECRET) {
-  console.error("FATAL: WEBHOOK_SECRET environment variable is not set. The application cannot start.");
-  process.exit(1);
+if (!SECRET) {
+    console.error('FATAL: GITHUB_SECRET environment variable is not set.')
+    process.exit(1)
 }
 
-// --- --- --- --- --- --- --- --- --- --- --- --- --- --- ---
-// HONO APPLICATION
-// --- --- --- --- --- --- --- --- --- --- --- --- --- --- ---
+const app = new Hono()
 
-const app = new Hono();
+app.use('/webhook', async (c, next) => {
+    const signature = c.req.header('x-hub-signature-256')
+    const event = c.req.header('x-github-event')
+    console.log("webhook")
 
-/**
- * Middleware to verify the signature from GitHub/GitLab.
- * This is essential to ensure that the request is authentic.
- */
-const verifySignature = async (c, next) => {
-  // We need the raw request body for HMAC calculation.
-  // We clone the request because reading the body consumes it,
-  // and we need it again later to parse as JSON.
-  const rawBody = await c.req.text();
-  
-  // Header name can vary by provider. GitHub uses 'X-Hub-Signature-256'.
-  const signature = c.req.header('X-Hub-Signature-256');
-
-  if (!signature) {
-    console.warn('Request received without a signature.');
-    return c.json({ error: 'Signature required' }, 401);
-  }
-  
-  // Calculate the expected signature
-  const hmac = crypto.createHmac('sha256', WEBHOOK_SECRET);
-  const expectedSignature = `sha256=${hmac.update(rawBody).digest('hex')}`;
-
-  // Use crypto.timingSafeEqual to prevent timing attacks
-  const isSignatureValid = crypto.timingSafeEqual(
-    Buffer.from(signature),
-    Buffer.from(expectedSignature)
-  );
-
-  if (!isSignatureValid) {
-    console.warn('Received a request with an invalid signature.');
-    return c.json({ error: 'Invalid signature' }, 403);
-  }
-
-  // If the signature is valid, parse the body and attach it to the context
-  // for the next handler to use.
-  c.set('payload', JSON.parse(rawBody));
-
-  await next();
-};
-
-// --- --- --- --- --- --- --- --- --- --- --- --- --- --- ---
-// ROUTES
-// --- --- --- --- --- --- --- --- --- --- --- --- --- --- ---
-
-// A simple root endpoint to confirm the server is running
-app.get('/', (c) => c.text('Git auto-deploy server is listening...'));
-
-// The main webhook endpoint
-app.post('/', verifySignature, async (c) => {
-  const payload = c.get('payload');
-  const event = c.req.header('X-GitHub-Event'); // For GitHub
-
-  // Only process 'push' events
-  if (event !== 'push') {
-    console.log(`Ignoring event: ${event}`);
-    return c.json({ message: 'Event ignored' }, 200);
-  }
-
-  const pushedBranch = payload.ref?.split('/').pop();
-  console.log(`Received push event for branch: ${pushedBranch}`);
-
-  // Check if the push was to the correct branch
-  if (pushedBranch !== REPO_BRANCH) {
-    return c.json({ message: `Push to '${pushedBranch}' ignored. Only tracking '${REPO_BRANCH}'.` }, 200);
-  }
-
-  console.log(`✅ Valid push to '${REPO_BRANCH}' detected. Initiating git pull...`);
-
-  try {
-    // Execute the git pull command
-    const { stdout, stderr } = await execPromise('git pull');
-    
-    console.log('--- Git Pull Output ---');
-    console.log(stdout);
-    if (stderr) {
-      console.error(stderr);
+    if (event !== 'push') {
+        return c.text('OK', 200)
     }
-    console.log('--- End Git Pull ---');
-    console.log('✅ Repository updated successfully.');
+    
+    if (!signature) {
+        console.error('Missing X-Hub-Signature-256 header.')
+        return c.text('Signature mismatch', 401)
+    }
 
-    // IMPORTANT: If your app needs to be restarted after a pull (e.g., to apply
-    // new code changes), you must do it here. For example, using a process
-    // manager like PM2:
-    // console.log('Restarting application with PM2...');
-    // await execPromise('pm2 restart my-app-name');
+    const rawBodyBuffer = await c.req.arrayBuffer()
+    const rawBody = Buffer.from(rawBodyBuffer)
 
-    return c.json({ success: true, message: 'Repository updated.', output: stdout });
+    const hmac = crypto.createHmac('sha256', SECRET)
+    const digest = 'sha256=' + hmac.update(rawBody).digest('hex')
 
-  } catch (error) {
-    console.error(`❌ Error executing git pull: ${error.message}`);
-    return c.json({ success: false, message: 'Failed to update repository.' }, 500);
-  }
-});
+    if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(digest))) {
+        console.error('Signature verification failed.')
+        return c.text('Signature mismatch', 401)
+    }
 
-// --- --- --- --- --- --- --- --- --- --- --- --- --- --- ---
-// SERVER START
-// --- --- --- --- --- --- --- --- --- --- --- --- --- --- ---
+    await next()
+})
 
-console.log(`🚀 Server starting on http://localhost:${PORT}`);
-serve({
-  fetch: app.fetch,
-  port: PORT,
-});
+app.post('/', async (c) => {
+    try {
+        const command = $`git -C ${REPO_PATH} pull`
+        await command
+        const result = await command.text()
+
+        if (command.exitCode !== 0) {
+            throw new Error(`Git command failed with exit code ${command.exitCode}`)
+        }
+
+        return c.text('Git pull successful.', 200)
+    } catch (e) {
+        const error = e instanceof Error ? e.message : 'Unknown git pull error'
+        console.error(`Git pull exec error: ${error}`)
+        return c.text(`Git pull failed: ${error}`, 500)
+    }
+})
+
+app.get("/", async (c) => {
+  return c.text("hi", 200)
+})
+
+const PORT = 3000
+Bun.serve({
+    fetch: app.fetch,
+    port: PORT,
+})
+
+console.log(`Hono server listening on port ${PORT}.`)
