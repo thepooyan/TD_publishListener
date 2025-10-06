@@ -1,0 +1,20 @@
+{
+  "name": "publishautomation",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.19.5",
+    "@types/node": "^24.6.2",
+    "child_process": "^1.0.2",
+    "crypto": "^1.0.1",
+    "dotenv": "^17.2.3",
+    "hono": "^4.9.9"
+  }
+}
