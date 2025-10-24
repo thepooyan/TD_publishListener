@@ -9,16 +9,17 @@ const GITHUB_TOKEN = env.TOKEN
 const REPO_PATH = env.REPO_PATH
 
 app.get('/', (c) => {
-  return c.text('Hello from publish automation')
+  return c.text('Publish automation is running.')
 })
 
 app.post('/publish', async (c) => {
+  console.log("Request income")
   const token = c.req.header('Authorization')
   if (!token || token !== `Bearer ${GITHUB_TOKEN}`) {
     return c.text('Unauthorized', 401)
   }
 
-  return new Promise<Response>((resolve) => {
+  return await new Promise<Response>((resolve) => {
     exec(`git -C ${REPO_PATH} pull`, (err, stdout, stderr) => {
       if (err) {
         resolve(c.text(`Git pull failed:\n${stderr}`, 500))
