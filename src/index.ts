@@ -9,11 +9,12 @@ const GITHUB_TOKEN = env.TOKEN
 const REPO_PATH = env.REPO_PATH
 
 app.get('/', (c) => {
+  console.log("Request income: /")
   return c.text('Publish automation is running.')
 })
 
 app.post('/publish', async (c) => {
-  console.log("Request income")
+  console.log("Request income: /publish")
   const token = c.req.header('Authorization')
   if (!token || token !== `Bearer ${GITHUB_TOKEN}`) {
     return c.text('Unauthorized', 401)
