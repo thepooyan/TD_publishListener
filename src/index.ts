@@ -1,11 +1,12 @@
 import { Hono } from 'hono'
 import { serve } from '@hono/node-server'
 import { exec } from 'node:child_process'
+import { env } from './env'
 
 const app = new Hono()
 
-const GITHUB_TOKEN = 'your-secret-token'
-const REPO_PATH = '/path/to/your/repo'
+const GITHUB_TOKEN = env.TOKEN
+const REPO_PATH = env.REPO_PATH
 
 app.get('/', (c) => {
   return c.text('Hello from publish automation')
